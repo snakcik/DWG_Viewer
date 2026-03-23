@@ -205,10 +205,16 @@ app.MapPost("/upload", async (IFormFile file) => {
                 var styleMatch = System.Text.RegularExpressions.Regex.Match(tag, @"style=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 if (styleMatch.Success) {
                     string styleVal = styleMatch.Groups[1].Value;
+                    
+                    // -- WIREFRAME MODE: Skip solid fills without strokes --
+                    bool hasFill = styleVal.Contains("fill:") && !styleVal.Contains("fill:none");
+                    bool hasStroke = styleVal.Contains("stroke:") && !styleVal.Contains("stroke:none");
+                    if (hasFill && !hasStroke) return null; // Skip this object entirely
+                    
                     if (!styleToClass.TryGetValue(styleVal, out string? cls)) {
                         cls = $"c{classCounter++}";
                         styleToClass[styleVal] = cls;
-                        cssRules.AppendLine($".{cls} {{ {styleVal} }}");
+                        cssRules.AppendLine($".{cls} {{ {styleVal.Replace("fill:", "fill-old:").Replace(";fill", ";fill-old")} ; fill: none !important; }}");
                     }
                     attrs.Add($"class=\"{cls}\"");
                 }
@@ -343,7 +349,9 @@ app.MapPost("/upload", async (IFormFile file) => {
                 bool isMergeable = (tagLower.StartsWith("<path") || tagLower.StartsWith("<line") || tagLower.StartsWith("<polyline") || tagLower.StartsWith("<polygon"));
                 if (isMergeable) {
                     tagCount++;
-                    string attrs = getPathAttrs(tagContent);
+                    string? attrs = getPathAttrs(tagContent);
+                    if (attrs == null) { dedupedTagCount++; continue; } // Skip solid-filled entity
+
                     string data = getPathData(tagContent);
                     if (string.IsNullOrEmpty(data)) { flushPath(); preservedElements.Append(tagContent); continue; }
 
