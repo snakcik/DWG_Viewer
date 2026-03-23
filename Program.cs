@@ -3,8 +3,11 @@ using System.Diagnostics;
 using System.Text;
 using System.Collections.Generic;
 
-var builder = WebApplication.CreateBuilder(args);
-// Add services to the container.
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.Limits.MaxRequestBodySize = 250 * 1024 * 1024; // 250MB
+});
+
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
