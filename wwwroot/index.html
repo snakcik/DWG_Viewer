@@ -47,6 +47,8 @@
     <header>
         <div style="font-weight: bold; font-size: 1.2rem;">IGNIS <span style="color: #ff7b00;">DWG VIEWER</span></div>
         <div style="display: flex; gap: 15px; align-items: center;">
+            <div id="hyperlinkCount" style="color: #666; font-size: 0.8rem; display: none;">0 Hiperlink</div>
+            <button class="log-btn" id="btnToggleLinks" style="display: none;" onclick="toggleHyperlinks()">Linkleri Göster</button>
             <button class="log-btn" onclick="toggleLogs()">Sistem Logları</button>
             <div id="status">Ready</div>
         </div>
@@ -68,8 +70,11 @@
             <div class="color-list" id="colorList"></div>
         </div>
 
-        <div id="hyperlinkPanel" style="position: absolute; top: 100px; left: 20px; width: 220px; background: rgba(26, 26, 36, 0.9); border: 1px solid #444; border-radius: 12px; padding: 15px; display: none; backdrop-filter: blur(10px); z-index: 100; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
-            <div class="panel-header">Hiperlinkler</div>
+        <div id="hyperlinkPanel" style="position: absolute; top: 100px; left: 20px; width: 220px; background: rgba(26, 26, 36, 0.95); border: 1px solid #ff7b00; border-radius: 12px; padding: 15px; display: none; backdrop-filter: blur(10px); z-index: 1000; box-shadow: 0 8px 32px rgba(0,0,0,0.8);">
+            <div class="panel-header" style="display: flex; justify-content: space-between;">
+                <span>Hiperlinkler</span>
+                <span onclick="toggleHyperlinks()" style="cursor: pointer; color: #ff4444;">&times;</span>
+            </div>
             <div class="color-list" id="hyperlinkList"></div>
         </div>
 
@@ -336,39 +341,59 @@
         function renderHyperlinks(links) {
             const panel = document.getElementById('hyperlinkPanel');
             const list = document.getElementById('hyperlinkList');
+            const btn = document.getElementById('btnToggleLinks');
+            const counter = document.getElementById('hyperlinkCount');
+            
             list.innerHTML = '';
             
             if (!links || links.length === 0) {
                 panel.style.display = 'none';
+                btn.style.display = 'none';
+                counter.style.display = 'none';
                 return;
             }
             
-            panel.style.display = 'block';
+            counter.innerText = `${links.length} Hiperlink Bulundu`;
+            counter.style.display = 'block';
+            btn.style.display = 'block';
+            // Auto open panel if links found
+            panel.style.display = 'block'; 
+            
             links.forEach(link => {
                 const item = document.createElement('div');
                 item.className = 'color-item';
                 item.style.cursor = 'pointer';
                 item.style.borderBottom = "1px solid #333";
-                item.style.padding = "5px 0";
+                item.style.padding = "8px 0";
+                item.setAttribute('title', 'Tıkla ve Git');
                 item.onclick = () => {
-                    const el = document.querySelector(`[xlink\\:href="${link}"], [href="${link}"]`);
-                    if (el && panZoomInstance) {
-                        const bbox = el.getBBox();
-                        console.log("Zooming to hyperlink target:", link);
-                        el.style.outline = "5px solid #ff7b00";
-                        setTimeout(() => el.style.outline = "none", 3000);
+                    // Try to find target in DOM
+                    const selector = `[xlink\\:href="${link}"], [href="${link}"]`;
+                    const els = viewer.querySelectorAll(selector);
+                    if (els.length > 0 && panZoomInstance) {
+                        console.log("Hyperlink target highlighted in DOM.");
+                        els.forEach(el => {
+                            el.style.stroke = "#ff7b00"; 
+                            el.style.strokeWidth = "10px";
+                            setTimeout(() => { el.style.stroke = ""; el.style.strokeWidth = ""; }, 3000);
+                        });
                     }
                     window.open(link, '_blank');
                 };
                 item.innerHTML = `
-                    <div style="font-size: 1.2rem; flex-shrink: 0;">🔗</div>
-                    <div class="color-info">
-                        <div style="color: #ff7b00; font-weight: bold; font-size: 0.75rem;">Link</div>
-                        <div class="original-indicator" style="font-size: 0.7rem;" title="${link}">${link}</div>
+                    <div style="font-size: 1.2rem; flex-shrink: 0; filter: drop-shadow(0 0 5px #ff7b00);">🔗</div>
+                    <div class="color-info" style="margin-left: 8px;">
+                        <div style="color: #ff7b00; font-weight: bold; font-size: 0.7rem;">Hiperlink</div>
+                        <div class="original-indicator" style="font-size: 0.75rem; color: white;" title="${link}">${link}</div>
                     </div>
                 `;
                 list.appendChild(item);
             });
+        }
+
+        function toggleHyperlinks() {
+            const p = document.getElementById('hyperlinkPanel');
+            p.style.display = p.style.display === 'none' ? 'block' : 'none';
         }
 
         const customColors = {};

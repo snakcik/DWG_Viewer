@@ -241,11 +241,13 @@ app.MapPost("/upload", async (IFormFile file) => {
 
                 string tagLower = tagContent.ToLower();
                 
-                // STRIP ID FOR PERFORMANCE (Except in defs or for text/links)
+                // STRIP ID AND CLIP-PATH FOR PERFORMANCE & RENDERING STABILITY
                 bool keepId = inDefs || tagLower.StartsWith("<text") || tagLower.StartsWith("<a");
                 if (!keepId) {
                     tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sid=""[^""]*""", "");
                 }
+                // Strip clip-path which often causes flickering or disappearing lines when panning large drawings
+                tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sclip-path=""[^""]*""", "");
 
                 // Fix <text> and <a> content
                 if (tagLower.StartsWith("<text") && !tagLower.EndsWith("/>")) {
@@ -337,7 +339,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                 tagCount++;
             }
             flushPath();
-            log($"[OPTI] Çizim tamamlandı: Toplam {tagCount} adet çizgi/obje işlendi, optimizasyon sonrası {mergedTagCount} adet birleştirilmiş objeye düşürüldü.");
+            log($"[OPTI] Çizim tamamlandı: {tagCount} obje işlendi, {mergedTagCount} birleştirilmiş grup, {hyperlinks.Count} hiperlink bulundu.");
 
             // --- 3. RECONSTRUCT ---
             var finalBody = new StringBuilder();
