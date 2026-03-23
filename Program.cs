@@ -176,7 +176,7 @@ app.MapPost("/upload", async (IFormFile file) => {
             int dedupedTagCount = 0;
             var dedupeSet = new HashSet<string>();
 
-            string currentPathAttrs = null;
+            string? currentPathAttrs = null;
             StringBuilder currentPathData = new StringBuilder();
 
             // Helpers for Path Merging & Deduplication
