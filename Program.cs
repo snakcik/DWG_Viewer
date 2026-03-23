@@ -326,10 +326,15 @@ app.MapPost("/upload", async (IFormFile file) => {
                 } else {
                     flushPath();
                     
-                    if (tagLower.StartsWith("<a")) {
-                        var hrefMatch = System.Text.RegularExpressions.Regex.Match(tagContent, @"(?:xlink:)?href=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
-                        if (hrefMatch.Success) {
-                            hyperlinks.Add(hrefMatch.Groups[1].Value);
+                    // EXTREME Hyperlink Extraction: Scan ANY tag for potential link attributes
+                    var linkPatterns = new[] { @"href=""([^""]+)""", @"xlink:href=""([^""]+)""", @"url=""([^""]+)""", @"link=""([^""]+)""" };
+                    foreach (var pattern in linkPatterns) {
+                        var matches = System.Text.RegularExpressions.Regex.Matches(tagContent, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        foreach (System.Text.RegularExpressions.Match m in matches) {
+                            string val = m.Groups[1].Value.Trim();
+                            if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) {
+                                hyperlinks.Add(val);
+                            }
                         }
                     }
                     

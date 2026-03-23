@@ -174,6 +174,8 @@
         }
 
         async function displaySvg(url, hyperlinks = []) {
+            console.log("Hyperlinks received from backend:", hyperlinks);
+            if (!hyperlinks) hyperlinks = [];
             console.log("Fetching SVG from URL:", url);
             try {
                 const tStartFetch = performance.now();
@@ -253,21 +255,23 @@
                                 foundActualContent = true;
                             }
                         });
-                        
-                            if (foundActualContent) {
+                        console.log(`Outlier filtering complete. foundActualContent: ${foundActualContent}, minX: ${minX}, minY: ${minY}, maxX: ${maxX}, maxY: ${maxY}`);
+                        if (foundActualContent) {
                                 bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
                             }
                         }
 
-                            if (bbox.width > 0 && bbox.height > 0) {
-                                const padding = Math.max(bbox.width, bbox.height) * 0.05;
-                                svgElement.setAttribute('viewBox', 
-                                    `${bbox.x - padding} ${bbox.y - padding} ${bbox.width + padding * 2} ${bbox.height + padding * 2}`);
-                                
-                                // Dynamic Stroke for fallback (CSS will mostly override this)
-                                const maxDim = Math.max(bbox.width, bbox.height);
-                                svgElement.style.strokeWidth = maxDim > 1000 ? "1.5px" : "1px";
-                            }
+                        console.log(`Final calculated ViewBox padding and injection. BBox: ${bbox.x}, ${bbox.y}, ${bbox.width}, ${bbox.height}`);
+                        if (bbox && bbox.width > 0) {
+                            const padding = Math.max(bbox.width, bbox.height) * 0.05;
+                            svgElement.setAttribute('viewBox', 
+                                `${bbox.x - padding} ${bbox.y - padding} ${bbox.width + padding * 2} ${bbox.height + padding * 2}`);
+                        }
+                            
+                            // Dynamic Stroke for fallback (CSS will mostly override this)
+                            const maxDim = Math.max(bbox.width, bbox.height);
+                            svgElement.style.strokeWidth = maxDim > 1000 ? "1.5px" : "1px";
+                            
                             panZoomInstance = svgPanZoom(svgElement, {
                                 zoomEnabled: true,
                                 controlIconsEnabled: true,
@@ -336,16 +340,17 @@
             list.innerHTML = '';
             
             if (!links || links.length === 0) {
-                panel.style.display = 'none';
+                list.innerHTML = '<div style="color: #666; padding: 10px; font-size: 0.8rem;">Bu dosyada link bulunamadı.</div>';
+                panel.style.display = 'none'; // Keep hidden by default if none, but button stays
                 btn.style.display = 'none';
-                counter.style.display = 'none';
+                counter.style.display = 'block';
+                counter.innerText = '0 Hiperlink';
                 return;
             }
             
             counter.innerText = `${links.length} Hiperlink Bulundu`;
             counter.style.display = 'block';
             btn.style.display = 'block';
-            // Auto open panel if links found
             panel.style.display = 'block'; 
             
             links.forEach(link => {
