@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using System.Diagnostics;
 using System.Text;
 using System.Collections.Generic;
+var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
