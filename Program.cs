@@ -155,7 +155,8 @@ app.MapPost("/upload", async (IFormFile file) => {
 
             string header = finalSvg.Substring(svgStart, bodyStart - svgStart);
             bool hasExistingViewBox = System.Text.RegularExpressions.Regex.IsMatch(header, @"viewBox=""[^""]+""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            log($"SVG parsed. Header length: {header.Length}, Body length: {bodyEnd - bodyStart}, hasExistingViewBox: {hasExistingViewBox}. Scanning tags...")            // --- 0. PRE-SCAN FOR HYPERLINKS WITH COORDINATES ---
+            log($"SVG parsed. Header length: {header.Length}, Body length: {bodyEnd - bodyStart}, hasExistingViewBox: {hasExistingViewBox}. Scanning tags...");
+            // --- 0. PRE-SCAN FOR HYPERLINKS WITH COORDINATES ---
             var hyperlinksData = new List<object>();
             var seenLinks = new HashSet<string>();
             var fullLinkPattern = @"<a\s+[^>]*?xlink:href=[""']([^""']+)[""'][^>]*?>(.*?)</a>";
