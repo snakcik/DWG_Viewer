@@ -181,6 +181,17 @@ app.MapPost("/upload", async (IFormFile file) => {
                 return string.Join(" ", attrs);
             };
 
+            Func<string, string> roundCoords = (data) => {
+                // Rounding to nearest 0.5 to save space while keeping reasonable precision for large drawings
+                return System.Text.RegularExpressions.Regex.Replace(data, @"-?\d+\.\d+", m => {
+                    if (double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double n)) {
+                        double rounded = Math.Round(n * 2) / 2.0;
+                        return rounded.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    return m.Value;
+                });
+            };
+
             Func<string, string> getPathData = (tag) => {
                 string lower = tag.ToLower();
                 string d = "";
@@ -200,8 +211,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                 }
                 
                 if (string.IsNullOrEmpty(d)) return "";
-                // Rounding coordinates to 1 decimal place to save space and improve merge hits
-                return System.Text.RegularExpressions.Regex.Replace(d, @"(-?\d+\.\d)\d+", "$1");
+                return roundCoords(d);
             };
             
             Action flushPath = () => {
@@ -222,6 +232,16 @@ app.MapPost("/upload", async (IFormFile file) => {
             
             while (current < bodyEnd) {
                 int nextTagStart = finalSvg.IndexOf('<', current);
+                // WHITESPACE CATCH: If there is content between tags, check if it's just whitespace
+                if (nextTagStart > current) {
+                    string gap = finalSvg.Substring(current, nextTagStart - current);
+                    if (!string.IsNullOrWhiteSpace(gap)) {
+                        flushPath(); // Real text content, must flush
+                        preservedElements.Append(gap);
+                    }
+                    // If just whitespace, we DON'T flush, allowing paths to merge across lines
+                }
+                
                 if (nextTagStart < 0 || nextTagStart >= bodyEnd) break;
                 
                 int nextTagEnd = -1;
@@ -257,18 +277,6 @@ app.MapPost("/upload", async (IFormFile file) => {
                     tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sid=""[^""]*""", "");
                 }
                 tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sclip-path=""[^""]*""", "");
-
-                // -- ViewBox Coordinate Collection --
-                if (!inDefs && !hasExistingViewBox) {
-                    var coords = System.Text.RegularExpressions.Regex.Matches(tagContent, @"(-?\d+(?:\.\d+)?)");
-                    foreach (System.Text.RegularExpressions.Match m in coords) {
-                        if (double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double n)) {
-                            if (n < minX) minX = n; if (n > maxX) maxX = n;
-                            if (n < minY) minY = n; if (n > maxY) maxY = n;
-                            foundCoords = true;
-                        }
-                    }
-                }
 
                 // -- Link Extraction --
                 var linkPatterns = new[] { @"href=""([^""]+)""", @"xlink:href=""([^""]+)""", @"url=""([^""]+)""", @"link=""([^""]+)""" };
@@ -316,14 +324,14 @@ app.MapPost("/upload", async (IFormFile file) => {
                 tagLower = tagContent.ToLower();
 
                 // -- Merge & Dedupe --
-                bool isMergeable = !inDefs && (tagLower.StartsWith("<path") || tagLower.StartsWith("<line") || tagLower.StartsWith("<polyline") || tagLower.StartsWith("<polygon"));
+                bool isMergeable = (tagLower.StartsWith("<path") || tagLower.StartsWith("<line") || tagLower.StartsWith("<polyline") || tagLower.StartsWith("<polygon"));
                 if (isMergeable) {
                     tagCount++;
                     string attrs = getPathAttrs(tagContent);
                     string data = getPathData(tagContent);
-                    if (string.IsNullOrEmpty(data)) { flushPath(); preservedElements.Append(tagContent + "\n"); continue; }
+                    if (string.IsNullOrEmpty(data)) { flushPath(); preservedElements.Append(tagContent); continue; }
 
-                    if (attrs == currentPathAttrs && currentPathData.Length < 100000) {
+                    if (attrs == currentPathAttrs && currentPathData.Length < 200000) {
                         currentPathData.Append(" " + data);
                         mergedTagCount++;
                     } else {
@@ -333,10 +341,23 @@ app.MapPost("/upload", async (IFormFile file) => {
                     }
                 } else {
                     flushPath();
-                    preservedElements.Append(tagContent + "\n");
+                    preservedElements.Append(tagContent);
                 }
             }
             flushPath();
+
+            // -- Final Coordinate Scan for ViewBox (on the optimized content) --
+            if (!hasExistingViewBox) {
+                var coords = System.Text.RegularExpressions.Regex.Matches(preservedElements.ToString(), @"(-?\d+(?:\.\d+)?)");
+                foreach (System.Text.RegularExpressions.Match m in coords) {
+                    if (double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double n)) {
+                        if (n < minX) minX = n; if (n > maxX) maxX = n;
+                        if (n < minY) minY = n; if (n > maxY) maxY = n;
+                        foundCoords = true;
+                    }
+                }
+            }
+
             log($"[OPTI] Çizim tamamlandı: {tagCount} obje işlendi, {mergedTagCount} birleştirme yapıldı, {dedupedTagCount} kopya silindi, {hyperlinks.Count} hiperlink bulundu.");
 
             // --- 3. RECONSTRUCT ---
