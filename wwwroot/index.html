@@ -68,6 +68,11 @@
             <div class="color-list" id="colorList"></div>
         </div>
 
+        <div id="hyperlinkPanel" style="position: absolute; top: 100px; left: 20px; width: 220px; background: rgba(26, 26, 36, 0.9); border: 1px solid #444; border-radius: 12px; padding: 15px; display: none; backdrop-filter: blur(10px); z-index: 100; box-shadow: 0 8px 32px rgba(0,0,0,0.5);">
+            <div class="panel-header">Hiperlinkler</div>
+            <div class="color-list" id="hyperlinkList"></div>
+        </div>
+
         <div class="controls" id="controls">
             <button onclick="resetZoom()">Reset Zoom</button>
             <button onclick="location.reload()">Upload New</button>
@@ -151,7 +156,7 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    displaySvg(result.svgUrl);
+                    displaySvg(result.svgUrl, result.hyperlinks);
                 } else {
                     alert('Error: ' + result.message);
                 }
@@ -163,7 +168,7 @@
             }
         }
 
-        async function displaySvg(url) {
+        async function displaySvg(url, hyperlinks = []) {
             console.log("Fetching SVG from URL:", url);
             try {
                 const tStartFetch = performance.now();
@@ -287,7 +292,8 @@
                         }
                         // ALWAYS init color palette if we have an SVG
                         initColorPalette(svgText);
-                        console.log("Color palette initialized.");
+                        renderHyperlinks(hyperlinks);
+                        console.log("Color palette and hyperlinks initialized.");
                     } catch (e) {
                         console.error("Exception during rendering/PanZoom init:", e);
                         alert("Rendering Error: " + e.message);
@@ -324,6 +330,44 @@
                     </div>
                 `;
                 colorList.appendChild(item);
+            });
+        }
+
+        function renderHyperlinks(links) {
+            const panel = document.getElementById('hyperlinkPanel');
+            const list = document.getElementById('hyperlinkList');
+            list.innerHTML = '';
+            
+            if (!links || links.length === 0) {
+                panel.style.display = 'none';
+                return;
+            }
+            
+            panel.style.display = 'block';
+            links.forEach(link => {
+                const item = document.createElement('div');
+                item.className = 'color-item';
+                item.style.cursor = 'pointer';
+                item.style.borderBottom = "1px solid #333";
+                item.style.padding = "5px 0";
+                item.onclick = () => {
+                    const el = document.querySelector(`[xlink\\:href="${link}"], [href="${link}"]`);
+                    if (el && panZoomInstance) {
+                        const bbox = el.getBBox();
+                        console.log("Zooming to hyperlink target:", link);
+                        el.style.outline = "5px solid #ff7b00";
+                        setTimeout(() => el.style.outline = "none", 3000);
+                    }
+                    window.open(link, '_blank');
+                };
+                item.innerHTML = `
+                    <div style="font-size: 1.2rem; flex-shrink: 0;">🔗</div>
+                    <div class="color-info">
+                        <div style="color: #ff7b00; font-weight: bold; font-size: 0.75rem;">Link</div>
+                        <div class="original-indicator" style="font-size: 0.7rem;" title="${link}">${link}</div>
+                    </div>
+                `;
+                list.appendChild(item);
             });
         }
 

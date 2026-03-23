@@ -162,6 +162,7 @@ app.MapPost("/upload", async (IFormFile file) => {
             bool inDefs = false;
             int tagCount = 0;
             int mergedTagCount = 0;
+            var hyperlinks = new HashSet<string>();
 
             string currentPathAttrs = null;
             StringBuilder currentPathData = new StringBuilder();
@@ -322,6 +323,14 @@ app.MapPost("/upload", async (IFormFile file) => {
                     }
                 } else {
                     flushPath();
+                    
+                    if (tagLower.StartsWith("<a")) {
+                        var hrefMatch = System.Text.RegularExpressions.Regex.Match(tagContent, @"(?:xlink:)?href=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (hrefMatch.Success) {
+                            hyperlinks.Add(hrefMatch.Groups[1].Value);
+                        }
+                    }
+                    
                     preservedElements.Append(tagContent);
                     mergedTagCount++;
                 }
@@ -359,7 +368,11 @@ app.MapPost("/upload", async (IFormFile file) => {
             swOpt.Stop();
             long finalSize = new FileInfo(outputPath).Length;
             log($"SUCCESS: Optimization complete in {swOpt.ElapsedMilliseconds}ms. Final size: {finalSize} bytes (Original: {originalSize}).");
-            return Results.Ok(new { success = true, svgUrl = $"/output/{outputFileName}" });
+            return Results.Ok(new { 
+                success = true, 
+                svgUrl = $"/output/{outputFileName}",
+                hyperlinks = hyperlinks.OrderBy(x => x).ToList()
+            });
         }
         else {
             log($"ERROR: SVG not found and stdout was empty or invalid. First 50 chars: {(output.Length > 50 ? output.Substring(0,50) : output)}... STDERR: {error}");
