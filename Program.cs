@@ -267,44 +267,42 @@ app.MapPost("/upload", async (IFormFile file) => {
                     }
                 }
 
-                // Process colors and add data attributes (Only if NOT in defs)
-                if (!inDefs) {
-                    string updatedTag = tagContent;
-                    bool isMorphed = false;
-                    var matches = System.Text.RegularExpressions.Regex.Matches(tagContent, @"(stroke|fill)[:=]\s*""?\s*(#[0-9a-fA-F]{3,6}|rgb\([^)]+\)|[a-zA-Z]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    foreach (System.Text.RegularExpressions.Match match in matches) {
-                        string attrType = match.Groups[1].Value.ToLower();
-                        string c = match.Groups[2].Value.Trim().ToLower();
-                        string origMatch = match.Value;
-                        if (c == "none") continue;
-                        string replacementColor = c;
-                        if (IsTooDark(c)) replacementColor = "#cccccc";
-                        if (replacementColor != c) {
-                            string newAttr = origMatch.Replace(match.Groups[2].Value, replacementColor);
-                            updatedTag = updatedTag.Replace(origMatch, newAttr);
-                            isMorphed = true;
-                        }
-                        string dataAttr = $"data-original-{attrType}=\"{replacementColor}\"";
-                        if (!updatedTag.Contains(dataAttr)) {
-                            int spaceIdx = updatedTag.IndexOf(' ');
-                            if (spaceIdx > 0) updatedTag = updatedTag.Insert(spaceIdx, $" {dataAttr}");
-                            else {
-                                int closeIdx = updatedTag.IndexOf('>');
-                                if (closeIdx > 0) updatedTag = updatedTag.Insert(closeIdx, $" {dataAttr}");
-                            }
-                            isMorphed = true;
-                        }
+                // Process colors and add data attributes (Even in defs, as many elements are defined there as symbols)
+                string colorUpdatedTag = tagContent;
+                bool isMorphed = false;
+                var colorMatches = System.Text.RegularExpressions.Regex.Matches(tagContent, @"(stroke|fill)[:=]\s*""?\s*(#[0-9a-fA-F]{3,6}|rgb\([^)]+\)|[a-zA-Z]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                foreach (System.Text.RegularExpressions.Match match in colorMatches) {
+                    string attrType = match.Groups[1].Value.ToLower();
+                    string c = match.Groups[2].Value.Trim().ToLower();
+                    string origMatch = match.Value;
+                    if (c == "none") continue;
+                    string replacementColor = c;
+                    if (IsTooDark(c)) replacementColor = "#cccccc";
+                    if (replacementColor != c) {
+                        string newAttr = origMatch.Replace(match.Groups[2].Value, replacementColor);
+                        colorUpdatedTag = colorUpdatedTag.Replace(origMatch, newAttr);
+                        isMorphed = true;
                     }
-                    if (isMorphed && !updatedTag.Contains("class=\"color-group\"")) {
-                         int spaceIdx = updatedTag.IndexOf(' ');
-                         if (spaceIdx > 0) updatedTag = updatedTag.Insert(spaceIdx, " class=\"color-group\"");
-                         else {
-                             int closeIdx = updatedTag.IndexOf('>');
-                             if (closeIdx > 0) updatedTag = updatedTag.Insert(closeIdx, " class=\"color-group\"");
-                         }
+                    string dataAttr = $"data-original-{attrType}=\"{replacementColor}\"";
+                    if (!colorUpdatedTag.Contains(dataAttr)) {
+                        int spaceIdx = colorUpdatedTag.IndexOf(' ');
+                        if (spaceIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(spaceIdx, $" {dataAttr}");
+                        else {
+                            int closeIdx = colorUpdatedTag.IndexOf('>');
+                            if (closeIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(closeIdx, $" {dataAttr}");
+                        }
+                        isMorphed = true;
                     }
-                    tagContent = updatedTag;
                 }
+                if (isMorphed && !colorUpdatedTag.Contains("class=\"color-group\"")) {
+                     int spaceIdx = colorUpdatedTag.IndexOf(' ');
+                     if (spaceIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(spaceIdx, " class=\"color-group\"");
+                     else {
+                         int closeIdx = colorUpdatedTag.IndexOf('>');
+                         if (closeIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(closeIdx, " class=\"color-group\"");
+                     }
+                }
+                tagContent = colorUpdatedTag;
 
                 // --- MERGE LOGIC ---
                 // Re-calculate tagLower after color processing
