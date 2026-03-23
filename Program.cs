@@ -186,23 +186,40 @@ app.MapPost("/upload", async (IFormFile file) => {
             string? currentPathAttrs = null;
             StringBuilder currentPathData = new StringBuilder();
 
+            // Style to Class mapping
+            var styleToClass = new Dictionary<string, string>();
+            int classCounter = 0;
+            var cssRules = new StringBuilder();
+
             // Helpers for Path Merging & Deduplication
             Func<string, string?> getPathAttrs = (tag) => {
                 var attrs = new List<string>();
                 var matches = System.Text.RegularExpressions.Regex.Matches(tag, @"\s([a-zA-Z0-9\-:]+)=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.Singleline);
                 foreach (System.Text.RegularExpressions.Match m in matches) {
                     string name = m.Groups[1].Value.ToLower();
-                    // DO NOT skip data-original attributes, they are needed for the color palette!
-                    if (name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "points" || name == "d" || name == "id") continue;
+                    if (name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "points" || name == "d" || name == "id" || name == "style") continue;
                     attrs.Add($"{m.Groups[1].Value}=\"{m.Groups[2].Value}\"");
                 }
+                
+                // Extract style to global CSS
+                var styleMatch = System.Text.RegularExpressions.Regex.Match(tag, @"style=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (styleMatch.Success) {
+                    string styleVal = styleMatch.Groups[1].Value;
+                    if (!styleToClass.TryGetValue(styleVal, out string? cls)) {
+                        cls = $"c{classCounter++}";
+                        styleToClass[styleVal] = cls;
+                        cssRules.AppendLine($".{cls} {{ {styleVal} }}");
+                    }
+                    attrs.Add($"class=\"{cls}\"");
+                }
+
                 attrs.Sort();
                 return string.Join(" ", attrs);
             };
 
             Func<string, string> roundCoords = (data) => {
-                // Precision 0.001 (3 decimals) to eliminate zigzags completely while still being cleaner than raw
-                return System.Text.RegularExpressions.Regex.Replace(data, @"(-?\d+\.\d{3})\d+", "$1");
+                // Precision 0.0001 (4 decimals) is hyper-precise for all CAD scales
+                return System.Text.RegularExpressions.Regex.Replace(data, @"(-?\d+\.\d{4})\d+", "$1");
             };
 
             Func<string, string> getPathData = (tag) => {
@@ -379,8 +396,14 @@ app.MapPost("/upload", async (IFormFile file) => {
             header = System.Text.RegularExpressions.Regex.Replace(header, @"\swidth=""[^""]*""", " width=\"100%\"");
             header = System.Text.RegularExpressions.Regex.Replace(header, @"\sheight=""[^""]*""", " height=\"100%\"");
 
-            // HARDWARE ACCELERATION CSS + VISIBILITY FIX
-            string baseStyle = "<style>svg { overflow: hidden !important; } #main-content { will-change: transform; } path, polyline, line, circle, rect, ellipse, polygon { vector-effect: none !important; pointer-events: none; stroke-width: 1px !important; } text { fill: #ffffff !important; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; }</style>";
+            // HARDWARE ACCELERATION CSS + DYNAMIC STYLE CLASSES
+            string baseStyle = $@"<style>
+                svg {{ overflow: hidden !important; }} 
+                #main-content {{ will-change: transform; }} 
+                path, polyline, line, circle, rect, ellipse, polygon {{ vector-effect: none !important; pointer-events: none; stroke-width: 1px !important; }} 
+                text {{ fill: #ffffff !important; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; }}
+                {cssRules.ToString()}
+            </style>";
             
             finalSvg = header + "<defs>" + baseStyle + "</defs>" + finalBody.ToString() + "</svg>";
 
