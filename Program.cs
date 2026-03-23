@@ -158,15 +158,22 @@ app.MapPost("/upload", async (IFormFile file) => {
             log($"SVG parsed. Header length: {header.Length}, Body length: {bodyEnd - bodyStart}, hasExistingViewBox: {hasExistingViewBox}. Scanning tags...");
                        // --- 0. PRE-SCAN FOR HYPERLINKS ---
             var hyperlinks = new HashSet<string>();
-            var linkPatterns = new[] { @"href=""([^""]+)""", @"xlink:href=""([^""]+)""", @"url=""([^""]+)""", @"link=""([^""]+)""" };
+            // More flexible regex to catch href, xlink:href with single or double quotes and spaces
+            var linkPatterns = new[] { 
+                @"(?:href|xlink:href|url|link)\s*=\s*[""']([^""']+)[""']",
+                @"xlink:href\s*=\s*[""']([^""']+)[""']" 
+            };
             foreach (var pattern in linkPatterns) {
                 var matches = System.Text.RegularExpressions.Regex.Matches(finalSvg, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 foreach (System.Text.RegularExpressions.Match m in matches) {
                     string val = m.Groups[1].Value.Trim();
-                    if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) hyperlinks.Add(val);
+                    // Exclude internal anchors and data URIs
+                    if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) {
+                        hyperlinks.Add(val);
+                    }
                 }
             }
-            log($"[HYPER] Raw SVG içinde {hyperlinks.Count} link bulundu.");
+            log($"[HYPER] Raw SVG içinde {hyperlinks.Count} benzersiz link bulundu.");
 
             // Fast Tag-by-Tag Scan
             int current = bodyStart;
@@ -180,12 +187,13 @@ app.MapPost("/upload", async (IFormFile file) => {
             StringBuilder currentPathData = new StringBuilder();
 
             // Helpers for Path Merging & Deduplication
-            Func<string, string> getPathAttrs = (tag) => {
+            Func<string, string?> getPathAttrs = (tag) => {
                 var attrs = new List<string>();
                 var matches = System.Text.RegularExpressions.Regex.Matches(tag, @"\s([a-zA-Z0-9\-:]+)=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.Singleline);
                 foreach (System.Text.RegularExpressions.Match m in matches) {
                     string name = m.Groups[1].Value.ToLower();
-                    if (name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "points" || name == "d" || name == "id" || name.StartsWith("data-original-")) continue;
+                    // DO NOT skip data-original attributes, they are needed for the color palette!
+                    if (name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "points" || name == "d" || name == "id") continue;
                     attrs.Add($"{m.Groups[1].Value}=\"{m.Groups[2].Value}\"");
                 }
                 attrs.Sort();
@@ -193,8 +201,8 @@ app.MapPost("/upload", async (IFormFile file) => {
             };
 
             Func<string, string> roundCoords = (data) => {
-                // Precision 0.1 is the sweet spot for no zigzag while still compressing 
-                return System.Text.RegularExpressions.Regex.Replace(data, @"(-?\d+\.\d)\d+", "$1");
+                // Precision 0.001 (3 decimals) to eliminate zigzags completely while still being cleaner than raw
+                return System.Text.RegularExpressions.Regex.Replace(data, @"(-?\d+\.\d{3})\d+", "$1");
             };
 
             Func<string, string> getPathData = (tag) => {
