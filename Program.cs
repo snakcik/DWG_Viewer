@@ -156,24 +156,25 @@ app.MapPost("/upload", async (IFormFile file) => {
             string header = finalSvg.Substring(svgStart, bodyStart - svgStart);
             bool hasExistingViewBox = System.Text.RegularExpressions.Regex.IsMatch(header, @"viewBox=""[^""]+""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             log($"SVG parsed. Header length: {header.Length}, Body length: {bodyEnd - bodyStart}, hasExistingViewBox: {hasExistingViewBox}. Scanning tags...");
-            
-            // Fast Tag-by-Tag Scan
+                       // Fast Tag-by-Tag Scan
             int current = bodyStart;
             bool inDefs = false;
             int tagCount = 0;
             int mergedTagCount = 0;
+            int dedupedTagCount = 0;
             var hyperlinks = new HashSet<string>();
+            var dedupeSet = new HashSet<string>();
 
             string currentPathAttrs = null;
             StringBuilder currentPathData = new StringBuilder();
 
-            // Helpers for Path Merging
+            // Helpers for Path Merging & Deduplication
             Func<string, string> getPathAttrs = (tag) => {
                 var attrs = new List<string>();
                 var matches = System.Text.RegularExpressions.Regex.Matches(tag, @"\s([a-zA-Z0-9\-]+)=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.Singleline);
                 foreach (System.Text.RegularExpressions.Match m in matches) {
                     string name = m.Groups[1].Value.ToLower();
-                    if (name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "points" || name == "d" || name == "id") continue;
+                    if (name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "points" || name == "d" || name == "id" || name.StartsWith("data-original-")) continue;
                     attrs.Add($"{name}=\"{m.Groups[2].Value}\"");
                 }
                 attrs.Sort();
@@ -182,30 +183,40 @@ app.MapPost("/upload", async (IFormFile file) => {
 
             Func<string, string> getPathData = (tag) => {
                 string lower = tag.ToLower();
+                string d = "";
                 if (lower.StartsWith("<line")) {
                     var mx1 = System.Text.RegularExpressions.Regex.Match(tag, @"x1=""([^""]+)""");
                     var my1 = System.Text.RegularExpressions.Regex.Match(tag, @"y1=""([^""]+)""");
                     var mx2 = System.Text.RegularExpressions.Regex.Match(tag, @"x2=""([^""]+)""");
                     var my2 = System.Text.RegularExpressions.Regex.Match(tag, @"y2=""([^""]+)""");
                     if (mx1.Success && my1.Success && mx2.Success && my2.Success)
-                        return $"M{mx1.Groups[1].Value} {my1.Groups[1].Value} L{mx2.Groups[1].Value} {my2.Groups[1].Value}";
+                        d = $"M{mx1.Groups[1].Value} {my1.Groups[1].Value} L{mx2.Groups[1].Value} {my2.Groups[1].Value}";
                 } else if (lower.StartsWith("<polyline") || lower.StartsWith("<polygon")) {
                     var mp = System.Text.RegularExpressions.Regex.Match(tag, @"points=""([^""]+)""");
-                    if (mp.Success) return "M " + mp.Groups[1].Value;
+                    if (mp.Success) d = "M " + mp.Groups[1].Value;
                 } else if (lower.StartsWith("<path")) {
-                    var md = System.Text.RegularExpressions.Regex.Match(tag, @"\sd=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.Singleline);
-                    if (!md.Success) md = System.Text.RegularExpressions.Regex.Match(tag, @"<path\s+d=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.Singleline);
-                    if (md.Success) return md.Groups[1].Value;
+                    var md = System.Text.RegularExpressions.Regex.Match(tag, @"\sd=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (md.Success) d = md.Groups[1].Value;
                 }
-                return "";
+                
+                if (string.IsNullOrEmpty(d)) return "";
+                // Rounding coordinates to 1 decimal place to save space and improve merge hits
+                return System.Text.RegularExpressions.Regex.Replace(d, @"(-?\d+\.\d)\d+", "$1");
             };
-
+            
             Action flushPath = () => {
                 if (currentPathData.Length > 0) {
-                     preservedElements.Append($"<path {currentPathAttrs} d=\"{currentPathData}\"/>");
-                     currentPathData.Clear();
-                     currentPathAttrs = null;
-                     mergedTagCount++;
+                    string combinedPath = currentPathData.ToString().Trim();
+                    string dedupeKey = (currentPathAttrs ?? "") + "|" + combinedPath;
+                    
+                    if (!dedupeSet.Contains(dedupeKey)) {
+                        preservedElements.Append($"<path {currentPathAttrs} d=\"{combinedPath}\"/>\n");
+                        dedupeSet.Add(dedupeKey);
+                    } else {
+                        dedupedTagCount++;
+                    }
+                    currentPathData.Clear();
+                    currentPathAttrs = null;
                 }
             };
             
@@ -216,7 +227,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                 int nextTagEnd = -1;
                 if (nextTagStart + 4 < bodyEnd && finalSvg.Substring(nextTagStart, 4) == "<!--") {
                     nextTagEnd = finalSvg.IndexOf("-->", nextTagStart);
-                    if (nextTagEnd >= 0) nextTagEnd += 2; // Point to '>' in -->
+                    if (nextTagEnd >= 0) nextTagEnd += 2; 
                 } else {
                     bool tQuo = false;
                     for (int i = nextTagStart; i < bodyEnd; i++) {
@@ -241,24 +252,13 @@ app.MapPost("/upload", async (IFormFile file) => {
 
                 string tagLower = tagContent.ToLower();
                 
-                // STRIP ID AND CLIP-PATH FOR PERFORMANCE & RENDERING STABILITY
-                bool keepId = inDefs || tagLower.StartsWith("<text") || tagLower.StartsWith("<a");
-                if (!keepId) {
+                // STRIP ID AND CLIP-PATH
+                if (!inDefs && !tagLower.StartsWith("<text") && !tagLower.StartsWith("<a")) {
                     tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sid=""[^""]*""", "");
                 }
-                // Strip clip-path which often causes flickering or disappearing lines when panning large drawings
                 tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sclip-path=""[^""]*""", "");
 
-                // Fix <text> and <a> content
-                if (tagLower.StartsWith("<text") && !tagLower.EndsWith("/>")) {
-                     int endText = finalSvg.IndexOf("</text>", current, StringComparison.OrdinalIgnoreCase);
-                     if (endText > 0) { tagContent += finalSvg.Substring(current, endText - current + 7); current = endText + 7; }
-                } else if (tagLower.StartsWith("<a") && !tagLower.EndsWith("/>")) {
-                     int endA = finalSvg.IndexOf("</a>", current, StringComparison.OrdinalIgnoreCase);
-                     if (endA > 0) { tagContent += finalSvg.Substring(current, endA - current + 4); current = endA + 4; }
-                }
-                
-                // Coordinate Scan for ViewBox (Matches integers and decimals)
+                // -- ViewBox Coordinate Collection --
                 if (!inDefs && !hasExistingViewBox) {
                     var coords = System.Text.RegularExpressions.Regex.Matches(tagContent, @"(-?\d+(?:\.\d+)?)");
                     foreach (System.Text.RegularExpressions.Match m in coords) {
@@ -270,81 +270,74 @@ app.MapPost("/upload", async (IFormFile file) => {
                     }
                 }
 
-                // Process colors and add data attributes (Even in defs, as many elements are defined there as symbols)
+                // -- Link Extraction --
+                var linkPatterns = new[] { @"href=""([^""]+)""", @"xlink:href=""([^""]+)""", @"url=""([^""]+)""", @"link=""([^""]+)""" };
+                foreach (var pattern in linkPatterns) {
+                    var matches = System.Text.RegularExpressions.Regex.Matches(tagContent, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    foreach (System.Text.RegularExpressions.Match m in matches) {
+                        string val = m.Groups[1].Value.Trim();
+                        if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) hyperlinks.Add(val);
+                    }
+                }
+
+                // -- Fix multi-line tags (<text>, <a>) --
+                if (tagLower.StartsWith("<text") && !tagLower.EndsWith("/>")) {
+                     int endText = finalSvg.IndexOf("</text>", current, StringComparison.OrdinalIgnoreCase);
+                     if (endText > 0) { tagContent += finalSvg.Substring(current, endText - current + 7); current = endText + 7; }
+                } else if (tagLower.StartsWith("<a") && !tagLower.EndsWith("/>")) {
+                     int endA = finalSvg.IndexOf("</a>", current, StringComparison.OrdinalIgnoreCase);
+                     if (endA > 0) { tagContent += finalSvg.Substring(current, endA - current + 4); current = endA + 4; }
+                }
+
+                // -- Color Transform --
                 string colorUpdatedTag = tagContent;
                 bool isMorphed = false;
-                var colorMatches = System.Text.RegularExpressions.Regex.Matches(tagContent, @"(stroke|fill)[:=]\s*""?\s*(#[0-9a-fA-F]{3,6}|rgb\([^)]+\)|[a-zA-Z]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                foreach (System.Text.RegularExpressions.Match match in colorMatches) {
-                    string attrType = match.Groups[1].Value.ToLower();
-                    string c = match.Groups[2].Value.Trim().ToLower();
-                    string origMatch = match.Value;
-                    if (c == "none") continue;
-                    string replacementColor = c;
-                    if (IsTooDark(c)) replacementColor = "#cccccc";
-                    if (replacementColor != c) {
-                        string newAttr = origMatch.Replace(match.Groups[2].Value, replacementColor);
-                        colorUpdatedTag = colorUpdatedTag.Replace(origMatch, newAttr);
-                        isMorphed = true;
-                    }
-                    string dataAttr = $"data-original-{attrType}=\"{replacementColor}\"";
-                    if (!colorUpdatedTag.Contains(dataAttr)) {
-                        int spaceIdx = colorUpdatedTag.IndexOf(' ');
-                        if (spaceIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(spaceIdx, $" {dataAttr}");
-                        else {
-                            int closeIdx = colorUpdatedTag.IndexOf('>');
-                            if (closeIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(closeIdx, $" {dataAttr}");
+                var colorMatch = System.Text.RegularExpressions.Regex.Match(tagContent, @"(?:stroke|fill)[:=]\s*""?\s*(#[0-9a-fA-F]{3,6}|rgb\([^)]+\)|[a-zA-Z]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (colorMatch.Success) {
+                    string c = colorMatch.Value.Split(new[] {':','='})[1].Trim(' ','"','\'').ToLower();
+                    if (c != "none") {
+                        if (IsTooDark(c)) {
+                            colorUpdatedTag = colorUpdatedTag.Replace(colorMatch.Value, colorMatch.Value.Replace(c, "#cccccc"));
+                            isMorphed = true;
                         }
-                        isMorphed = true;
+                        if (!colorUpdatedTag.Contains("data-original-")) {
+                            string attrType = colorMatch.Value.Contains("stroke") ? "stroke" : "fill";
+                            int spaceIdx = colorUpdatedTag.IndexOf(' ');
+                            if (spaceIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(spaceIdx, $" data-original-{attrType}=\"{c}\"");
+                            isMorphed = true;
+                        }
                     }
                 }
                 if (isMorphed && !colorUpdatedTag.Contains("class=\"color-group\"")) {
-                     int spaceIdx = colorUpdatedTag.IndexOf(' ');
-                     if (spaceIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(spaceIdx, " class=\"color-group\"");
-                     else {
-                         int closeIdx = colorUpdatedTag.IndexOf('>');
-                         if (closeIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(closeIdx, " class=\"color-group\"");
-                     }
+                    int spaceIdx = colorUpdatedTag.IndexOf(' ');
+                    if (spaceIdx > 0) colorUpdatedTag = colorUpdatedTag.Insert(spaceIdx, " class=\"color-group\"");
                 }
                 tagContent = colorUpdatedTag;
-
-                // --- MERGE LOGIC ---
-                // Re-calculate tagLower after color processing
                 tagLower = tagContent.ToLower();
+
+                // -- Merge & Dedupe --
                 bool isMergeable = !inDefs && (tagLower.StartsWith("<path") || tagLower.StartsWith("<line") || tagLower.StartsWith("<polyline") || tagLower.StartsWith("<polygon"));
-                
                 if (isMergeable) {
+                    tagCount++;
                     string attrs = getPathAttrs(tagContent);
-                    string geom = getPathData(tagContent);
-                    
-                    if (attrs == currentPathAttrs && currentPathData.Length < 50000) {
-                        currentPathData.Append(" ").Append(geom);
+                    string data = getPathData(tagContent);
+                    if (string.IsNullOrEmpty(data)) { flushPath(); preservedElements.Append(tagContent + "\n"); continue; }
+
+                    if (attrs == currentPathAttrs && currentPathData.Length < 100000) {
+                        currentPathData.Append(" " + data);
+                        mergedTagCount++;
                     } else {
                         flushPath();
                         currentPathAttrs = attrs;
-                        currentPathData.Append(geom);
+                        currentPathData.Append(data);
                     }
                 } else {
                     flushPath();
-                    
-                    // EXTREME Hyperlink Extraction: Scan ANY tag for potential link attributes
-                    var linkPatterns = new[] { @"href=""([^""]+)""", @"xlink:href=""([^""]+)""", @"url=""([^""]+)""", @"link=""([^""]+)""" };
-                    foreach (var pattern in linkPatterns) {
-                        var matches = System.Text.RegularExpressions.Regex.Matches(tagContent, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                        foreach (System.Text.RegularExpressions.Match m in matches) {
-                            string val = m.Groups[1].Value.Trim();
-                            if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) {
-                                hyperlinks.Add(val);
-                            }
-                        }
-                    }
-                    
-                    preservedElements.Append(tagContent);
-                    mergedTagCount++;
+                    preservedElements.Append(tagContent + "\n");
                 }
-                tagCount++;
             }
             flushPath();
-            log($"[OPTI] Çizim tamamlandı: {tagCount} obje işlendi, {mergedTagCount} birleştirilmiş grup, {hyperlinks.Count} hiperlink bulundu.");
+            log($"[OPTI] Çizim tamamlandı: {tagCount} obje işlendi, {mergedTagCount} birleştirme yapıldı, {dedupedTagCount} kopya silindi, {hyperlinks.Count} hiperlink bulundu.");
 
             // --- 3. RECONSTRUCT ---
             var finalBody = new StringBuilder();
