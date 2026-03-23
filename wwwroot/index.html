@@ -353,32 +353,49 @@
             btn.style.display = 'block';
             panel.style.display = 'block'; 
             
-            links.forEach(link => {
+            links.forEach(linkObj => {
+                const linkText = linkObj.text;
+                const lx = linkObj.x;
+                const ly = linkObj.y;
+                
                 const item = document.createElement('div');
                 item.className = 'color-item';
                 item.style.cursor = 'pointer';
                 item.style.borderBottom = "1px solid #333";
                 item.style.padding = "8px 0";
-                item.setAttribute('title', 'Tıkla ve Git');
+                item.setAttribute('title', 'Cihaza Git ve Zoom Yap');
+                
                 item.onclick = () => {
-                    // Try to find target in DOM
-                    const selector = `[xlink\\:href="${link}"], [href="${link}"]`;
-                    const els = viewer.querySelectorAll(selector);
-                    if (els.length > 0 && panZoomInstance) {
-                        console.log("Hyperlink target highlighted in DOM.");
+                    if (panZoomInstance && lx !== 0 && ly !== 0) {
+                        // 1. Center the view on coordinates
+                        const sizes = panZoomInstance.getSizes();
+                        const targetZoom = 15; // Deep zoom level
+                        panZoomInstance.zoom(targetZoom);
+                        
+                        const newSizes = panZoomInstance.getSizes(); // Get updated zoom factor
+                        panZoomInstance.pan({
+                            x: -lx * newSizes.realZoom + (newSizes.width / 2),
+                            y: -ly * newSizes.realZoom + (newSizes.height / 2)
+                        });
+
+                        // 2. Highlight target briefly (visual feedback)
+                        const selector = `[xlink\\:href="${linkText}"], [href="${linkText}"]`;
+                        const els = viewer.querySelectorAll(selector);
                         els.forEach(el => {
-                            el.style.stroke = "#ff7b00"; 
-                            el.style.strokeWidth = "10px";
+                            el.style.stroke = "#ff7b00";
+                            el.style.strokeWidth = "20px";
                             setTimeout(() => { el.style.stroke = ""; el.style.strokeWidth = ""; }, 3000);
                         });
+                    } else {
+                        window.open(linkText, '_blank');
                     }
-                    window.open(link, '_blank');
                 };
                 item.innerHTML = `
                     <div style="font-size: 1.2rem; flex-shrink: 0; filter: drop-shadow(0 0 5px #ff7b00);">🔗</div>
                     <div class="color-info" style="margin-left: 8px;">
-                        <div style="color: #ff7b00; font-weight: bold; font-size: 0.7rem;">Hiperlink</div>
-                        <div class="original-indicator" style="font-size: 0.75rem; color: white;" title="${link}">${link}</div>
+                        <div style="color: #ff7b00; font-weight: bold; font-size: 0.7rem;">Cihaz Linki</div>
+                        <div class="original-indicator" style="font-size: 0.75rem; color: white;" title="${linkText}">${linkText}</div>
+                        ${lx !== 0 ? `<div style="font-size: 0.6rem; color: #888;">Konum: ${lx.toFixed(0)}, ${ly.toFixed(0)}</div>` : ''}
                     </div>
                 `;
                 list.appendChild(item);

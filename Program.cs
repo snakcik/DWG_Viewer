@@ -155,29 +155,32 @@ app.MapPost("/upload", async (IFormFile file) => {
 
             string header = finalSvg.Substring(svgStart, bodyStart - svgStart);
             bool hasExistingViewBox = System.Text.RegularExpressions.Regex.IsMatch(header, @"viewBox=""[^""]+""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            log($"SVG parsed. Header length: {header.Length}, Body length: {bodyEnd - bodyStart}, hasExistingViewBox: {hasExistingViewBox}. Scanning tags...");
-                       // --- 0. PRE-SCAN FOR HYPERLINKS ---
-            var hyperlinks = new HashSet<string>();
-            // More flexible regex to catch href, xlink:href with single or double quotes and spaces
-            var linkPatterns = new[] { 
-                @"(?:href|xlink:href|url|link)\s*=\s*[""']([^""']+)[""']",
-                @"xlink:href\s*=\s*[""']([^""']+)[""']" 
-            };
-            foreach (var pattern in linkPatterns) {
-                var matches = System.Text.RegularExpressions.Regex.Matches(finalSvg, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                foreach (System.Text.RegularExpressions.Match m in matches) {
-                    string val = m.Groups[1].Value.Trim();
-                    // Exclude internal anchors and data URIs
-                    if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) {
-                        hyperlinks.Add(val);
-                    }
+            log($"SVG parsed. Header length: {header.Length}, Body length: {bodyEnd - bodyStart}, hasExistingViewBox: {hasExistingViewBox}. Scanning tags...")            // --- 0. PRE-SCAN FOR HYPERLINKS WITH COORDINATES ---
+            var hyperlinksData = new List<object>();
+            var seenLinks = new HashSet<string>();
+            var fullLinkPattern = @"<a\s+[^>]*?xlink:href=[""']([^""']+)[""'][^>]*?>(.*?)</a>";
+            var linkMatches = System.Text.RegularExpressions.Regex.Matches(finalSvg, fullLinkPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+            
+            foreach (System.Text.RegularExpressions.Match lm in linkMatches) {
+                string val = lm.Groups[1].Value.Trim();
+                if (string.IsNullOrEmpty(val) || val.StartsWith("#") || val.StartsWith("data:")) continue;
+                if (!seenLinks.Add(val)) continue;
+
+                string inner = lm.Groups[2].Value;
+                var coordMatch = System.Text.RegularExpressions.Regex.Match(inner, @"d=[""']M\s*(-?\d+\.?\d*)\s*(-?\d+\.?\d*)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                double lx = 0, ly = 0;
+                if (coordMatch.Success) {
+                    double.TryParse(coordMatch.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out lx);
+                    double.TryParse(coordMatch.Groups[2].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out ly);
                 }
+                hyperlinksData.Add(new { text = val, x = lx, y = ly });
             }
-            log($"[HYPER] Raw SVG içinde {hyperlinks.Count} benzersiz link bulundu.");
+            log($"[HYPER] Raw SVG içinde {hyperlinksData.Count} benzersiz link ve koordinat bulundu.");
 
             // Fast Tag-by-Tag Scan
             int current = bodyStart;
             bool inDefs = false;
+            var segmentsInCurrentPath = new HashSet<long>();
             int tagCount = 0;
             int mergedTagCount = 0;
             int dedupedTagCount = 0;
@@ -413,7 +416,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                 }
             }
 
-            log($"[OPTI] Tamamlandı: {tagCount} obje, {mergedTagCount} birleştirme, {dedupedTagCount} kopya silindi, {hyperlinks.Count} link bulundu.");
+            log($"[OPTI] Tamamlandı: {tagCount} obje, {mergedTagCount} birleştirme, {dedupedTagCount} kopya silindi, {hyperlinksData.Count} link bulundu.");
 
             // --- 3. RECONSTRUCT ---
             var finalBody = new StringBuilder();
@@ -453,7 +456,7 @@ app.MapPost("/upload", async (IFormFile file) => {
             return Results.Ok(new { 
                 success = true, 
                 svgUrl = $"/output/{outputFileName}",
-                hyperlinks = hyperlinks.OrderBy(x => x).ToList()
+                hyperlinks = hyperlinksData
             });
         }
         else {
