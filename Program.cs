@@ -156,13 +156,24 @@ app.MapPost("/upload", async (IFormFile file) => {
             string header = finalSvg.Substring(svgStart, bodyStart - svgStart);
             bool hasExistingViewBox = System.Text.RegularExpressions.Regex.IsMatch(header, @"viewBox=""[^""]+""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             log($"SVG parsed. Header length: {header.Length}, Body length: {bodyEnd - bodyStart}, hasExistingViewBox: {hasExistingViewBox}. Scanning tags...");
-                       // Fast Tag-by-Tag Scan
+                       // --- 0. PRE-SCAN FOR HYPERLINKS ---
+            var hyperlinks = new HashSet<string>();
+            var linkPatterns = new[] { @"href=""([^""]+)""", @"xlink:href=""([^""]+)""", @"url=""([^""]+)""", @"link=""([^""]+)""" };
+            foreach (var pattern in linkPatterns) {
+                var matches = System.Text.RegularExpressions.Regex.Matches(finalSvg, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                foreach (System.Text.RegularExpressions.Match m in matches) {
+                    string val = m.Groups[1].Value.Trim();
+                    if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) hyperlinks.Add(val);
+                }
+            }
+            log($"[HYPER] Raw SVG içinde {hyperlinks.Count} link bulundu.");
+
+            // Fast Tag-by-Tag Scan
             int current = bodyStart;
             bool inDefs = false;
             int tagCount = 0;
             int mergedTagCount = 0;
             int dedupedTagCount = 0;
-            var hyperlinks = new HashSet<string>();
             var dedupeSet = new HashSet<string>();
 
             string currentPathAttrs = null;
@@ -171,25 +182,19 @@ app.MapPost("/upload", async (IFormFile file) => {
             // Helpers for Path Merging & Deduplication
             Func<string, string> getPathAttrs = (tag) => {
                 var attrs = new List<string>();
-                var matches = System.Text.RegularExpressions.Regex.Matches(tag, @"\s([a-zA-Z0-9\-]+)=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.Singleline);
+                var matches = System.Text.RegularExpressions.Regex.Matches(tag, @"\s([a-zA-Z0-9\-:]+)=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.Singleline);
                 foreach (System.Text.RegularExpressions.Match m in matches) {
                     string name = m.Groups[1].Value.ToLower();
                     if (name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "points" || name == "d" || name == "id" || name.StartsWith("data-original-")) continue;
-                    attrs.Add($"{name}=\"{m.Groups[2].Value}\"");
+                    attrs.Add($"{m.Groups[1].Value}=\"{m.Groups[2].Value}\"");
                 }
                 attrs.Sort();
                 return string.Join(" ", attrs);
             };
 
             Func<string, string> roundCoords = (data) => {
-                // Rounding to nearest 0.5 to save space while keeping reasonable precision for large drawings
-                return System.Text.RegularExpressions.Regex.Replace(data, @"-?\d+\.\d+", m => {
-                    if (double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double n)) {
-                        double rounded = Math.Round(n * 2) / 2.0;
-                        return rounded.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    }
-                    return m.Value;
-                });
+                // Precision 0.1 is the sweet spot for no zigzag while still compressing 
+                return System.Text.RegularExpressions.Regex.Replace(data, @"(-?\d+\.\d)\d+", "$1");
             };
 
             Func<string, string> getPathData = (tag) => {
@@ -220,7 +225,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                     string dedupeKey = (currentPathAttrs ?? "") + "|" + combinedPath;
                     
                     if (!dedupeSet.Contains(dedupeKey)) {
-                        preservedElements.Append($"<path {currentPathAttrs} d=\"{combinedPath}\"/>\n");
+                        preservedElements.Append($"<path {currentPathAttrs} d=\"{combinedPath}\"/>");
                         dedupeSet.Add(dedupeKey);
                     } else {
                         dedupedTagCount++;
@@ -232,14 +237,11 @@ app.MapPost("/upload", async (IFormFile file) => {
             
             while (current < bodyEnd) {
                 int nextTagStart = finalSvg.IndexOf('<', current);
-                // WHITESPACE CATCH: If there is content between tags, check if it's just whitespace
                 if (nextTagStart > current) {
                     string gap = finalSvg.Substring(current, nextTagStart - current);
                     if (!string.IsNullOrWhiteSpace(gap)) {
-                        flushPath(); // Real text content, must flush
-                        preservedElements.Append(gap);
+                        flushPath(); preservedElements.Append(gap);
                     }
-                    // If just whitespace, we DON'T flush, allowing paths to merge across lines
                 }
                 
                 if (nextTagStart < 0 || nextTagStart >= bodyEnd) break;
@@ -272,21 +274,10 @@ app.MapPost("/upload", async (IFormFile file) => {
 
                 string tagLower = tagContent.ToLower();
                 
-                // STRIP ID AND CLIP-PATH
                 if (!inDefs && !tagLower.StartsWith("<text") && !tagLower.StartsWith("<a")) {
                     tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sid=""[^""]*""", "");
                 }
                 tagContent = System.Text.RegularExpressions.Regex.Replace(tagContent, @"\sclip-path=""[^""]*""", "");
-
-                // -- Link Extraction --
-                var linkPatterns = new[] { @"href=""([^""]+)""", @"xlink:href=""([^""]+)""", @"url=""([^""]+)""", @"link=""([^""]+)""" };
-                foreach (var pattern in linkPatterns) {
-                    var matches = System.Text.RegularExpressions.Regex.Matches(tagContent, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    foreach (System.Text.RegularExpressions.Match m in matches) {
-                        string val = m.Groups[1].Value.Trim();
-                        if (!string.IsNullOrEmpty(val) && !val.StartsWith("#") && !val.StartsWith("data:")) hyperlinks.Add(val);
-                    }
-                }
 
                 // -- Fix multi-line tags (<text>, <a>) --
                 if (tagLower.StartsWith("<text") && !tagLower.EndsWith("/>")) {
@@ -331,7 +322,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                     string data = getPathData(tagContent);
                     if (string.IsNullOrEmpty(data)) { flushPath(); preservedElements.Append(tagContent); continue; }
 
-                    if (attrs == currentPathAttrs && currentPathData.Length < 200000) {
+                    if (attrs == currentPathAttrs && currentPathData.Length < 250000) {
                         currentPathData.Append(" " + data);
                         mergedTagCount++;
                     } else {
@@ -346,7 +337,7 @@ app.MapPost("/upload", async (IFormFile file) => {
             }
             flushPath();
 
-            // -- Final Coordinate Scan for ViewBox (on the optimized content) --
+            // -- Final Coordinate Scan for ViewBox --
             if (!hasExistingViewBox) {
                 var coords = System.Text.RegularExpressions.Regex.Matches(preservedElements.ToString(), @"(-?\d+(?:\.\d+)?)");
                 foreach (System.Text.RegularExpressions.Match m in coords) {
@@ -358,7 +349,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                 }
             }
 
-            log($"[OPTI] Çizim tamamlandı: {tagCount} obje işlendi, {mergedTagCount} birleştirme yapıldı, {dedupedTagCount} kopya silindi, {hyperlinks.Count} hiperlink bulundu.");
+            log($"[OPTI] Tamamlandı: {tagCount} obje, {mergedTagCount} birleştirme, {dedupedTagCount} kopya silindi, {hyperlinks.Count} link bulundu.");
 
             // --- 3. RECONSTRUCT ---
             var finalBody = new StringBuilder();
