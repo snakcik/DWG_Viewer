@@ -355,13 +355,44 @@ app.MapPost("/upload", async (IFormFile file) => {
                     string data = getPathData(tagContent);
                     if (string.IsNullOrEmpty(data)) { flushPath(); preservedElements.Append(tagContent); continue; }
 
-                    if (attrs == currentPathAttrs && currentPathData.Length < 250000) {
-                        currentPathData.Append(" " + data);
-                        mergedTagCount++;
-                    } else {
+                    if (attrs != currentPathAttrs || currentPathData.Length > 250000) {
                         flushPath();
                         currentPathAttrs = attrs;
+                    }
+
+                    // -- HEURISTIC HATCH DECIMATION (Scanline Filter) --
+                    // Split data into segments: M x1 y1 L x2 y2
+                    var segMatches = System.Text.RegularExpressions.Regex.Matches(data, @"M\s*(-?\d+\.?\d*)\s*(-?\d+\.?\d*)\s*L\s*(-?\d+\.?\d*)\s*(-?\d+\.?\d*)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (segMatches.Count > 0) {
+                        foreach (System.Text.RegularExpressions.Match sm in segMatches) {
+                            if (double.TryParse(sm.Groups[1].Value, out double x1) && double.TryParse(sm.Groups[2].Value, out double y1) &&
+                                double.TryParse(sm.Groups[3].Value, out double x2) && double.TryParse(sm.Groups[4].Value, out double y2)) {
+                                
+                                // Quantize for spatial comparison (0.5 unit threshold)
+                                long qx1 = (long)(Math.Round(x1 * 2) * 10); // * 10 to avoid collisions with 0
+                                long qy1 = (long)(Math.Round(y1 * 2) * 10);
+                                long qx2 = (long)(Math.Round(x2 * 2) * 10);
+                                long qy2 = (long)(Math.Round(y2 * 2) * 10);
+                                
+                                // Create a unique hash for this segment (independent of direction)
+                                long h1 = qx1 ^ (qy1 << 16) ^ (qx2 << 32) ^ (qy2 << 48);
+                                long h2 = qx2 ^ (qy2 << 16) ^ (qx1 << 32) ^ (qy1 << 48);
+                                long segmentHash = Math.Min(h1, h2);
+
+                                if (segmentsInCurrentPath.Add(segmentHash)) {
+                                    if (currentPathData.Length > 0) currentPathData.Append(" ");
+                                    currentPathData.Append(sm.Value);
+                                    mergedTagCount++;
+                                } else {
+                                    dedupedTagCount++;
+                                }
+                            }
+                        }
+                    } else {
+                        // Not a standard M L segment, add it as is but flush to be safe
+                        if (currentPathData.Length > 0) currentPathData.Append(" ");
                         currentPathData.Append(data);
+                        mergedTagCount++;
                     }
                 } else {
                     flushPath();
