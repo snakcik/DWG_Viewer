@@ -259,25 +259,8 @@
                             }
                         }
 
-                        console.log(`Final calculated ViewBox padding and injection. BBox: ${bbox.x}, ${bbox.y}, ${bbox.width}, ${bbox.height}`);
-                            if (bbox.width > 0 && bbox.height > 0) {
-                                const padding = Math.max(bbox.width, bbox.height) * 0.05;
-                                svgElement.setAttribute('viewBox', 
-                                    `${bbox.x - padding} ${bbox.y - padding} ${bbox.width + padding * 2} ${bbox.height + padding * 2}`);
-                                
-                                // High Dynamic Stroke: Extremely important for high zoom cases
-                                const maxSize = Math.max(bbox.width, bbox.height);
-                                if (maxSize < 10) {
-                                     svgElement.style.strokeWidth = "8px"; // Atomic projects
-                                } else if (maxSize < 100) {
-                                     svgElement.style.strokeWidth = "5px"; // Micro projects
-                                } else if (maxSize < 1000) {
-                                     svgElement.style.strokeWidth = "2.5px"; // Small projects
-                                } else {
-                                     svgElement.style.strokeWidth = "1.2px"; // Standard
-                                }
-                            }
-
+                            // High Dynamic Stroke is now handled via CSS vector-effect: non-scaling-stroke
+                            
                             console.log("Initializing PanZoom library...");
                             panZoomInstance = svgPanZoom(svgElement, {
                                 zoomEnabled: true,

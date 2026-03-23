@@ -327,7 +327,7 @@ app.MapPost("/upload", async (IFormFile file) => {
                     flushPath();
                     
                     if (tagLower.StartsWith("<a")) {
-                        var hrefMatch = System.Text.RegularExpressions.Regex.Match(tagContent, @"(?:xlink:)?href=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        var hrefMatch = System.Text.RegularExpressions.Regex.Match(tagContent, @"(?:xlink:)?href=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
                         if (hrefMatch.Success) {
                             hyperlinks.Add(hrefMatch.Groups[1].Value);
                         }
@@ -361,8 +361,8 @@ app.MapPost("/upload", async (IFormFile file) => {
             header = System.Text.RegularExpressions.Regex.Replace(header, @"\swidth=""[^""]*""", " width=\"100%\"");
             header = System.Text.RegularExpressions.Regex.Replace(header, @"\sheight=""[^""]*""", " height=\"100%\"");
 
-            // HARDWARE ACCELERATION CSS + VISIBILITY FIX
-            string baseStyle = "<style>svg { overflow: hidden !important; } #main-content { will-change: transform; } path, polyline, line, circle, rect, ellipse, polygon { vector-effect: none !important; pointer-events: none; stroke-width: 1px !important; } text { fill: #ffffff !important; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; }</style>";
+            // HARDWARE ACCELERATION CSS + VISIBILITY FIX (Use non-scaling-stroke for CAD-like thin lines at any zoom)
+            string baseStyle = "<style>svg { overflow: hidden !important; background-color: #0f0f13 !important; } #main-content { will-change: transform; } path, polyline, line, circle, rect, ellipse, polygon { vector-effect: non-scaling-stroke !important; pointer-events: none; stroke-width: 1px !important; } text { fill: #ffffff !important; font-family: 'Segoe UI', Arial, sans-serif; font-weight: bold; }</style>";
             
             finalSvg = header + "<defs>" + baseStyle + "</defs>" + finalBody.ToString() + "</svg>";
 
