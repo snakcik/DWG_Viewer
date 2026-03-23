@@ -70,7 +70,7 @@
             <div class="color-list" id="colorList"></div>
         </div>
 
-        <div id="hyperlinkPanel" style="position: absolute; top: 100px; left: 20px; width: 220px; background: rgba(26, 26, 36, 0.95); border: 1px solid #ff7b00; border-radius: 12px; padding: 15px; display: none; backdrop-filter: blur(10px); z-index: 1000; box-shadow: 0 8px 32px rgba(0,0,0,0.8);">
+        <div id="hyperlinkPanel" style="position: absolute; top: 520px; right: 20px; width: 220px; background: rgba(26, 26, 36, 0.95); border: 1px solid #ff7b00; border-radius: 12px; padding: 15px; display: none; backdrop-filter: blur(10px); z-index: 1000; box-shadow: 0 8px 32px rgba(0,0,0,0.8);">
             <div class="panel-header" style="display: flex; justify-content: space-between;">
                 <span>Hiperlinkler</span>
                 <span onclick="toggleHyperlinks()" style="cursor: pointer; color: #ff4444;">&times;</span>
@@ -259,9 +259,15 @@
                             }
                         }
 
-                            // High Dynamic Stroke is now handled via CSS vector-effect: non-scaling-stroke
-                            
-                            console.log("Initializing PanZoom library...");
+                            if (bbox.width > 0 && bbox.height > 0) {
+                                const padding = Math.max(bbox.width, bbox.height) * 0.05;
+                                svgElement.setAttribute('viewBox', 
+                                    `${bbox.x - padding} ${bbox.y - padding} ${bbox.width + padding * 2} ${bbox.height + padding * 2}`);
+                                
+                                // Dynamic Stroke for fallback (CSS will mostly override this)
+                                const maxDim = Math.max(bbox.width, bbox.height);
+                                svgElement.style.strokeWidth = maxDim > 1000 ? "1.5px" : "1px";
+                            }
                             panZoomInstance = svgPanZoom(svgElement, {
                                 zoomEnabled: true,
                                 controlIconsEnabled: true,
