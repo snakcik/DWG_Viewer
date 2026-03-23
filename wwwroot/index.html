@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DWG Viewer | LibreDWG</title>
+    <style>
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f0f13; color: white; height: 100vh; display: flex; flex-direction: column; }
+        header { padding: 20px; background: #1a1a24; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+        .main-container { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+        #dropZone { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 3px dashed #444; padding: 40px; border-radius: 20px; text-align: center; cursor: pointer; transition: 0.3s; z-index: 10; background: #1a1a24; }
+        #dropZone:hover { border-color: #ff7b00; background: #22222e; }
+        #viewer { flex: 1; width: 100%; height: 100%; display: none; }
+        #viewer svg {
+            width: 100%;
+            height: 100%;
+            shape-rendering: optimizeSpeed;
+            text-rendering: optimizeSpeed;
+            will-change: transform;
+        }
+        .loading { display: none; margin-top: 10px; color: #ff7b00; }
+        .controls { position: absolute; bottom: 20px; right: 20px; display: none; gap: 10px; }
+        button { padding: 10px 20px; background: #ff7b00; border: none; color: black; font-weight: bold; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #e66f00; }
+
+        /* Color Panel Styles */
+        #colorPanel { position: absolute; top: 100px; right: 20px; width: 220px; background: rgba(26, 26, 36, 0.9); border: 1px solid #444; border-radius: 12px; padding: 15px; display: none; backdrop-filter: blur(10px); z-index: 100; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+        .panel-header { font-weight: bold; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 8px; font-size: 0.9rem; color: #ff7b00; text-transform: uppercase; }
+        .color-list { max-height: 400px; overflow-y: auto; }
+        .color-item { display: flex; align-items: center; margin-bottom: 12px; gap: 12px; font-size: 0.85rem; }
+        .color-picker-wrapper { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; border: 2px solid #555; position: relative; flex-shrink: 0; }
+        .color-picker-wrapper input { position: absolute; top: -5px; left: -5px; width: 40px; height: 40px; cursor: pointer; border: none; padding: 0; background: none; }
+        .color-info { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ccc; }
+        .original-indicator { font-size: 0.7rem; color: #666; margin-top: 2px; }
+
+        /* Log Viewer Styles */
+        #logViewer { position: fixed; bottom: 0; left: 0; right: 0; height: 30%; background: rgba(10, 10, 15, 0.95); border-top: 2px solid #333; z-index: 1000; display: none; flex-direction: column; backdrop-filter: blur(15px); }
+        #logHeader { padding: 10px 20px; background: #1a1a24; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        #logContent { flex: 1; padding: 15px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.85rem; color: #00ff00; white-space: pre-wrap; line-height: 1.4; }
+        .log-btn { background: #333; color: white; border: 1px solid #444; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; transition: 0.2s; }
+        .log-btn:hover { background: #444; border-color: #ff7b00; }
+        .log-btn.active { background: #ff7b00; color: black; border-color: #ff7b00; }
+        .log-close { color: #ff4444; font-size: 1.2rem; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <header>
+        <div style="font-weight: bold; font-size: 1.2rem;">IGNIS <span style="color: #ff7b00;">DWG VIEWER</span></div>
+        <div style="display: flex; gap: 15px; align-items: center;">
+            <button class="log-btn" onclick="toggleLogs()">Sistem Logları</button>
+            <div id="status">Ready</div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div id="dropZone">
+            <div style="font-size: 3rem;">📄</div>
+            <h3>Drag & Drop DWG File</h3>
+            <p>or click to select</p>
+            <input type="file" id="fileInput" hidden accept=".dwg">
+            <div class="loading" id="loader">Converting... Please wait.</div>
+        </div>
+
+        <div id="viewer"></div>
+        
+        <div id="colorPanel">
+            <div class="panel-header">Renk Kontrolü</div>
+            <div class="color-list" id="colorList"></div>
+        </div>
+
+        <div class="controls" id="controls">
+            <button onclick="resetZoom()">Reset Zoom</button>
+            <button onclick="location.reload()">Upload New</button>
+        </div>
+
+        <div id="logViewer">
+            <div id="logHeader">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div style="font-weight: bold; color: #ff7b00; margin-right: 15px;">DIAGNOSTICS</div>
+                    <button id="btnBackend" class="log-btn active" onclick="setLogMode('backend')">Backend</button>
+                    <button id="btnBrowser" class="log-btn" onclick="setLogMode('browser')">Browser</button>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="log-btn" onclick="refreshLogs()">Yenile</button>
+                    <button class="log-btn" onclick="clearServerLogs()">Temizle</button>
+                    <span class="log-close" onclick="toggleLogs()">&times;</span>
+                </div>
+            </div>
+            <div id="logContent">Yükleniyor...</div>
+        </div>
+    </div>
+
+    <script src="lib/svg-pan-zoom.min.js"></script>
+    <script>
+        // --- LOG INTERCEPTION START ---
+        const browserLogs = [];
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        let currentLogMode = 'backend';
+
+        function addToBrowserLogs(type, args) {
+            const msg = Array.from(args).map(arg => {
+                if (typeof arg === 'object') {
+                    try { return JSON.stringify(arg); } catch(e) { return "[Object]"; }
+                }
+                return String(arg);
+            }).join(' ');
+            browserLogs.push(`[${new Date().toLocaleTimeString()}] [${type}] ${msg}`);
+            if (currentLogMode === 'browser' && document.getElementById('logViewer').style.display === 'flex') {
+                renderBrowserLogs();
+            }
+        }
+
+        console.log = function() { originalLog.apply(console, arguments); addToBrowserLogs('INFO', arguments); };
+        console.warn = function() { originalWarn.apply(console, arguments); addToBrowserLogs('WARN', arguments); };
+        console.error = function() { originalError.apply(console, arguments); addToBrowserLogs('ERR', arguments); };
+        // --- LOG INTERCEPTION END ---
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const viewer = document.getElementById('viewer');
+        const loader = document.getElementById('loader');
+        const controls = document.getElementById('controls');
+        const colorPanel = document.getElementById('colorPanel');
+        const colorList = document.getElementById('colorList');
+        let panZoomInstance = null;
+
+        dropZone.onclick = () => fileInput.click();
+
+        fileInput.onchange = (e) => handleFile(e.target.files[0]);
+
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.style.borderColor = '#ff7b00'; };
+        dropZone.ondragleave = () => { dropZone.style.borderColor = '#444'; };
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            handleFile(e.dataTransfer.files[0]);
+        };
+
+        async function handleFile(file) {
+            if (!file) return;
+            
+            loader.style.display = 'block';
+            document.getElementById('status').innerText = 'Uploading...';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', { method: 'POST', body: formData });
+                const result = await response.json();
+
+                if (result.success) {
+                    displaySvg(result.svgUrl);
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (err) {
+                alert('Upload failed: ' + err.message);
+            } finally {
+                loader.style.display = 'none';
+                document.getElementById('status').innerText = 'Done';
+            }
+        }
+
+        async function displaySvg(url) {
+            console.log("Fetching SVG from URL:", url);
+            try {
+                const tStartFetch = performance.now();
+                const response = await fetch(url);
+                const svgText = await response.text();
+                const tEndFetch = performance.now();
+                console.log(`SVG fetched in ${(tEndFetch-tStartFetch).toFixed(0)}ms. Length: ${svgText.length}`);
+
+                if (svgText.length < 100) console.warn("SVG text seems too short!");
+
+                if (panZoomInstance) {
+                    panZoomInstance.destroy();
+                }
+
+                dropZone.style.display = 'none';
+                viewer.style.display = 'block';
+                controls.style.display = 'flex';
+                colorPanel.style.display = 'block'; // Show panel
+
+                const tStartInject = performance.now();
+                viewer.innerHTML = svgText;
+                const tEndInject = performance.now();
+                console.log(`SVG injected into DOM in ${(tEndInject-tStartInject).toFixed(0)}ms.`);
+
+                // Wait for render, then fix initial view and init PanZoom
+                let retryCount = 0;
+                const tryMeasure = () => {
+                    try {
+                        const contentGroup = viewer.querySelector('#main-content');
+                        const svgElement = viewer.querySelector('svg');
+                        
+                        if (!svgElement) {
+                            console.error("No <svg> element found in the injected HTML!");
+                            return;
+                        }
+                        if (!contentGroup) {
+                            console.warn("No #main-content group found. PanZoom might lack bounds.");
+                        }
+
+                        if (contentGroup && svgElement) {
+                            const tStartBBox = performance.now();
+                            let bbox = contentGroup.getBBox();
+                            const tEndBBox = performance.now();
+                            console.log(`getBBox() for attempt ${retryCount+1} took ${(tEndBBox-tStartBBox).toFixed(0)}ms. Bbox:`, bbox);
+                            
+                            // If bbox is still zero, browser hasn't calculated layout yet. Retry up to 20 times.
+                            if ((bbox.width === 0 || bbox.height === 0) && retryCount < 20) {
+                                retryCount++;
+                                setTimeout(tryMeasure, 100);
+                                return;
+                            }
+
+                            console.log("Passed BBox wait check. Proceeding with outlier filtering...");
+                            // INTELLIGENT CONTENT FILTER: Find the "Median" size child to ignore outliers (huge frames)
+                            const children = Array.from(contentGroup.children);
+                            console.log(`Found ${children.length} structural children in #main-content`);
+                            if (children.length > 5) {
+                                const samples = children.slice(0, 50).map(c => {
+                            const b = c.getBBox();
+                            return Math.max(b.width, b.height);
+                        }).filter(s => s > 0).sort((a,b) => a-b);
+                        
+                        const medianSize = samples[Math.floor(samples.length / 2)] || 0;
+                        const frameThreshold = medianSize * 50; // Anything 50x bigger than median is likely a frame (paper space, etc)
+
+                        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                        let foundActualContent = false;
+                        
+                        children.forEach(child => {
+                            const cbox = child.getBBox();
+                            // Skip huge outliers that look like world-borders or paper-space frames
+                            if (cbox.width > 0 && cbox.width < frameThreshold) {
+                                minX = Math.min(minX, cbox.x);
+                                minY = Math.min(minY, cbox.y);
+                                maxX = Math.max(maxX, cbox.x + cbox.width);
+                                maxY = Math.max(maxY, cbox.y + cbox.height);
+                                foundActualContent = true;
+                            }
+                        });
+                        
+                            if (foundActualContent) {
+                                bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+                            }
+                        }
+
+                        console.log(`Final calculated ViewBox padding and injection. BBox: ${bbox.x}, ${bbox.y}, ${bbox.width}, ${bbox.height}`);
+                            if (bbox.width > 0 && bbox.height > 0) {
+                                const padding = Math.max(bbox.width, bbox.height) * 0.05;
+                                svgElement.setAttribute('viewBox', 
+                                    `${bbox.x - padding} ${bbox.y - padding} ${bbox.width + padding * 2} ${bbox.height + padding * 2}`);
+                                
+                                // High Dynamic Stroke: Extremely important for high zoom cases
+                                const maxSize = Math.max(bbox.width, bbox.height);
+                                if (maxSize < 10) {
+                                     svgElement.style.strokeWidth = "8px"; // Atomic projects
+                                } else if (maxSize < 100) {
+                                     svgElement.style.strokeWidth = "5px"; // Micro projects
+                                } else if (maxSize < 1000) {
+                                     svgElement.style.strokeWidth = "2.5px"; // Small projects
+                                } else {
+                                     svgElement.style.strokeWidth = "1.2px"; // Standard
+                                }
+                            }
+
+                            console.log("Initializing PanZoom library...");
+                            panZoomInstance = svgPanZoom(svgElement, {
+                                zoomEnabled: true,
+                                controlIconsEnabled: true,
+                                fit: true,
+                                center: true,
+                                minZoom: 0.000000001, 
+                                maxZoom: 1000000000, // 1 Billion X zoom
+                                mouseWheelZoomEnabled: true
+                            });
+
+                            // Force a fit after library init to be sure
+                            panZoomInstance.resize();
+                            panZoomInstance.fit();
+                            panZoomInstance.center();
+                            console.log("PanZoom completely initialized.");
+                        }
+                        // ALWAYS init color palette if we have an SVG
+                        initColorPalette(svgText);
+                        console.log("Color palette initialized.");
+                    } catch (e) {
+                        console.error("Exception during rendering/PanZoom init:", e);
+                        alert("Rendering Error: " + e.message);
+                    }
+                };
+
+                setTimeout(tryMeasure, 50);
+            } catch (err) {
+                console.error("Exception in displaySvg fetching/DOM:", err);
+                alert("Cannot display SVG: " + err.message);
+            }
+        }
+
+        function initColorPalette(svgText) {
+            colorList.innerHTML = '';
+            const uniqueColors = new Set();
+            const regex = /data-original-(?:stroke|fill)="([^"]+)"/g;
+            let match;
+            while ((match = regex.exec(svgText)) !== null) {
+                if (match[1] !== 'none') uniqueColors.add(match[1]);
+            }
+
+            uniqueColors.forEach(color => {
+                const hexColor = colorToHex(color);
+                const item = document.createElement('div');
+                item.className = 'color-item';
+                item.innerHTML = `
+                    <div class="color-picker-wrapper">
+                        <input type="color" value="${hexColor}" oninput="updateGroupColor('${color}', this.value)">
+                    </div>
+                    <div class="color-info">
+                        <div>Layer Color</div>
+                        <div class="original-indicator">${color}</div>
+                    </div>
+                `;
+                colorList.appendChild(item);
+            });
+        }
+
+        const customColors = {};
+        function updateGroupColor(originalColor, newColor) {
+            customColors[originalColor] = newColor;
+            let css = '';
+            for (let og in customColors) {
+                css += `.color-group[data-original-stroke="${og}"] { stroke: ${customColors[og]} !important; }\n`;
+                css += `.color-group[data-original-fill="${og}"] { fill: ${customColors[og]} !important; }\n`;
+            }
+            let dynamicStyle = document.getElementById('dynamic-colors');
+            if (!dynamicStyle) {
+                dynamicStyle = document.createElement('style');
+                dynamicStyle.id = 'dynamic-colors';
+                document.head.appendChild(dynamicStyle);
+            }
+            dynamicStyle.textContent = css;
+        }
+
+        // Helper to convert any color to hex for the color input
+        function colorToHex(color) {
+            if (color.startsWith('#')) return color.length === 4 ? color[0] + color[1] + color[1] + color[2] + color[2] + color[3] + color[3] : color;
+            if (color.startsWith('rgb')) {
+                const values = color.match(/\d+/g);
+                return "#" + values.slice(0,3).map(x => parseInt(x).toString(16).padStart(2, '0')).join('');
+            }
+            // Fallback for named colors
+            const ctx = document.createElement('canvas').getContext('2d');
+            ctx.fillStyle = color;
+            return ctx.fillStyle;
+        }
+
+        function resetZoom() {
+            if (panZoomInstance) {
+                panZoomInstance.reset();
+                panZoomInstance.fit();
+                panZoomInstance.center();
+            }
+        }
+
+        async function toggleLogs() {
+            const lv = document.getElementById('logViewer');
+            if (lv.style.display === 'flex') {
+                lv.style.display = 'none';
+            } else {
+                lv.style.display = 'flex';
+                setLogMode(currentLogMode);
+            }
+        }
+
+        function setLogMode(mode) {
+            currentLogMode = mode;
+            document.getElementById('btnBackend').classList.toggle('active', mode === 'backend');
+            document.getElementById('btnBrowser').classList.toggle('active', mode === 'browser');
+            
+            if (mode === 'backend') {
+                refreshLogs();
+            } else {
+                renderBrowserLogs();
+            }
+        }
+
+        function renderBrowserLogs() {
+            const content = document.getElementById('logContent');
+            content.style.color = '#33ccff';
+            content.innerText = browserLogs.length > 0 ? browserLogs.join('\n') : "Browser logu yok.";
+            content.scrollTop = content.scrollHeight;
+        }
+
+        async function refreshLogs() {
+            if (currentLogMode !== 'backend') return;
+            const content = document.getElementById('logContent');
+            content.style.color = '#00ff00';
+            try {
+                const response = await fetch('/logs');
+                if (response.ok) {
+                    content.innerText = await response.text();
+                    content.scrollTop = content.scrollHeight;
+                } else {
+                    content.innerText = "Log dosyası henüz oluşmadı. Bir dosya yüklemeyi deneyin.";
+                }
+            } catch (err) {
+                content.innerText = "Loglar alınamadı: " + err.message;
+            }
+        }
+
+        async function clearServerLogs() {
+            if (currentLogMode === 'backend') {
+                if (!confirm("Sunucu loglarını temizlemek istediğinize emin misiniz?")) return;
+                await fetch('/clear-logs');
+                refreshLogs();
+            } else {
+                browserLogs.length = 0;
+                renderBrowserLogs();
+            }
+        }
+    </script>
+</body>
+</html>

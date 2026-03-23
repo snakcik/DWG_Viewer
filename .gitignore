@@ -1,0 +1,12 @@
+bin/
+obj/
+output/
+uploads/
+*.tmp.svg
+libredwg.zip
+libredwg_tool/
+logs.txt
+.vscode/
+.vs/
+*.swp
+*.user
