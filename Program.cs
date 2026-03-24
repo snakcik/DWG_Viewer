@@ -212,7 +212,10 @@ app.MapPost("/upload", async (IFormFile file) => {
                 // Extract style to global CSS
                 var styleMatch = System.Text.RegularExpressions.Regex.Match(tag, @"style=""([^""]*)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 if (styleMatch.Success) {
-                    string styleVal = styleMatch.Groups[1].Value;
+                    string styleVal = styleMatch.Groups[1].Value.ToLower();
+                    
+                    // Directly fix 0px stroke width to be 1px
+                    styleVal = System.Text.RegularExpressions.Regex.Replace(styleVal, @"stroke-width:\s*0(\.0+)?(px)?", "stroke-width:1px");
                     
                     // -- WIREFRAME MODE: Skip solid fills without strokes --
                     bool hasFill = styleVal.Contains("fill:") && !styleVal.Contains("fill:none");
