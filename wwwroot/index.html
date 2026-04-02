@@ -16,8 +16,20 @@
             height: 100%;
             shape-rendering: optimizeSpeed;
             text-rendering: optimizeSpeed;
-            will-change: transform;
+            pointer-events: all;
         }
+
+        /* SVG ana içeriğindeki gereksiz hit-test hesaplamalarını engelle */
+        #main-content {
+            pointer-events: none;
+        }
+
+        /* Yalnızca linkleri tıklanabilir bırak */
+        #main-content a, #main-content a * {
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
         .loading { display: none; margin-top: 10px; color: #ff7b00; }
         .controls { position: absolute; bottom: 20px; right: 20px; display: none; gap: 10px; }
         button { padding: 10px 20px; background: #ff7b00; border: none; color: black; font-weight: bold; border-radius: 4px; cursor: pointer; }
@@ -147,11 +159,35 @@
             handleFile(e.dataTransfer.files[0]);
         };
 
+        // Otomatik yükleme mekanizması
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch('/latest-map');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.svgUrl) {
+                        displaySvg(data.svgUrl, data.hyperlinks);
+                    }
+                }
+            } catch (e) {
+                console.warn("Otomatik yüklenecek harita bulunamadı veya hata oluştu.");
+            }
+        });
+
+        let isUploading = false;
         async function handleFile(file) {
-            if (!file) return;
+            if (!file || isUploading) return;
+            isUploading = true;
             
+            // Arayüz koruması: DropZone'u etkisizleştir ve stillerini değiştir
+            fileInput.disabled = true;
+            dropZone.style.pointerEvents = 'none';
+            dropZone.style.opacity = '0.5';
+            dropZone.style.cursor = 'not-allowed';
+
             loader.style.display = 'block';
-            document.getElementById('status').innerText = 'Uploading...';
+            loader.innerText = 'İşlem devam ediyor, lütfen bekleyin...';
+            document.getElementById('status').innerText = 'İşleniyor...';
 
             const formData = new FormData();
             formData.append('file', file);
@@ -163,13 +199,18 @@
                 if (result.success) {
                     displaySvg(result.svgUrl, result.hyperlinks);
                 } else {
-                    alert('Error: ' + result.message);
+                    alert('Hata: ' + (result.detail || result.message || 'Harita yüklenemedi.'));
                 }
             } catch (err) {
-                alert('Upload failed: ' + err.message);
+                alert('Gönderim Başarısız: Sunucu yoğun olabilir veya bağlantı koptu. Detay: ' + err.message);
             } finally {
+                isUploading = false;
+                fileInput.disabled = false;
+                dropZone.style.pointerEvents = 'auto';
+                dropZone.style.opacity = '1';
+                dropZone.style.cursor = 'pointer';
                 loader.style.display = 'none';
-                document.getElementById('status').innerText = 'Done';
+                document.getElementById('status').innerText = 'Durum: Hazır';
             }
         }
 
@@ -196,7 +237,9 @@
                 colorPanel.style.display = 'block'; // Show panel
 
                 const tStartInject = performance.now();
-                viewer.innerHTML = svgText;
+                // Eski oluşturulan SVG'lerde kalan GPU hızlandırma (VRAM şişiren) hatalı CSS komutlarını uçararak temizle
+                let optimizedSvg = svgText.replace(/will-change:\s*transform;?/gi, '');
+                viewer.innerHTML = optimizedSvg;
                 const tEndInject = performance.now();
                 console.log(`SVG injected into DOM in ${(tEndInject-tStartInject).toFixed(0)}ms.`);
 
